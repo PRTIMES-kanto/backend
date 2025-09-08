@@ -6,7 +6,7 @@ import (
 )
 
 type ReviewUsecaseInterface interface {
-	AnalyzeContent(content string) (*entity.ReviewResult, error)
+	AnalyzeContent(title, lead, body string) (*entity.ReviewResult, error)
 }
 
 type ReviewUsecase struct {
@@ -19,6 +19,6 @@ func NewReviewUsecase(aiClient external.AIClientInterface) ReviewUsecaseInterfac
 	}
 }
 
-func (u *ReviewUsecase) AnalyzeContent(content string) (*entity.ReviewResult, error) {
-	return u.AIClient.Analyze(content)
+func (u *ReviewUsecase) AnalyzeContent(title, lead, body string) (*entity.ReviewResult, error) {
+	return u.AIClient.Analyze(title, lead, body)
 }

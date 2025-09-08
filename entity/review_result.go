@@ -1,7 +1,13 @@
 package entity
 
+type FieldReview struct {
+	Improvement string `json:"improvement"`
+	Suggestion  string `json:"suggestion"`
+}
+
+// プレスリリース全体のレビュー結果
 type ReviewResult struct {
-	TitleFeedback string `json:"title_feedback"`
-	LeadFeedback  string `json:"lead_feedback"`
-	BodyFeedback  string `json:"body_feedback"`
+	Title FieldReview `json:"title"`
+	Lead  FieldReview `json:"lead"`
+	Body  FieldReview `json:"body"`
 }
