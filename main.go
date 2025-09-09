@@ -1,13 +1,10 @@
 package main
 
 import (
-	// "log"
-	// "os"
 
 	"prtimes/controller"
 	"prtimes/external"
 	"prtimes/usecase"
-
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
 )
@@ -20,7 +17,6 @@ func main() {
 		AllowOrigins: []string{"http://localhost:5173"},
 		AllowHeaders: []string{echo.HeaderOrigin, echo.HeaderContentType, echo.HeaderAccept},
 	}))
-
 	apiKey := ""
 
 	// AIクライアント、ユースケース、コントローラの初期化

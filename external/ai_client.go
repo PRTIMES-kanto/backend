@@ -1,31 +1,104 @@
 package external
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"log"
+	"net/http"
+	"path"
 	"strings"
+
+	"prtimes/entity"
+
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/aws/aws-sdk-go-v2/service/s3/types"
+	"github.com/google/uuid"
 
 	"github.com/openai/openai-go/v2"
 	"github.com/openai/openai-go/v2/option"
-	"prtimes/entity"
 )
 
+const s3Bucket = "gazou-hozon"
+
 type AIClientInterface interface {
-	Analyze(title, lead, body string) (*entity.ReviewResult, error)
+	Analyze(title, lead, body, s3ImageURL string) (*entity.ReviewResult, error)
+	UploadImageToS3(imageURL string) (string, error)
 }
 
 type OpenAIClient struct {
 	client openai.Client
+	s3Client *s3.Client
+	bucket string
 }
 
 func NewOpenAIClient(apiKey string) AIClientInterface {
+	// AWS S3クライアント初期化
+	cfg, err := config.LoadDefaultConfig(context.TODO(),
+		config.WithRegion("ap-northeast-1"),
+	)
+
+	if err != nil {
+		log.Fatalf("unable to load SDK config, %v", err)
+	}
+	s3Client := s3.NewFromConfig(cfg)
+
 	return &OpenAIClient{
 		client: openai.NewClient(option.WithAPIKey(apiKey)),
+		s3Client: s3Client,
+		bucket:   s3Bucket,
 	}
 }
 
-func (o *OpenAIClient) Analyze(title, lead, body string) (*entity.ReviewResult, error) {
+// URLから画像をダウンロードしてS3にアップロード
+func (o *OpenAIClient) UploadImageToS3(imageURL string) (string, error) {
+	// 1. 画像をダウンロード
+	resp, err := http.Get(imageURL)
+	if err != nil {
+		return "", fmt.Errorf("failed to download image: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("failed to download image: status %d", resp.StatusCode)
+	}
+
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("failed to read image data: %w", err)
+	}
+
+	// 2. ユニークなファイル名を生成
+	ext := path.Ext(imageURL)
+	if ext == "" {
+		ext = ".jpg" // デフォルト拡張子
+	}
+	key := fmt.Sprintf("%s%s", uuid.New().String(), ext)
+
+	// 3. S3 にアップロード
+	_, err = o.s3Client.PutObject(context.TODO(), &s3.PutObjectInput{
+		Bucket: aws.String(o.bucket),
+		Key:    aws.String(key),
+		Body:   bytes.NewReader(data),
+		ACL:    types.ObjectCannedACLPublicRead, // 公開URL
+	})
+	if err != nil {
+		return "", fmt.Errorf("failed to upload to S3: %w", err)
+	}
+
+	// 4. S3 の公開 URL を返す
+	s3URL := fmt.Sprintf("https://%s.s3.amazonaws.com/%s", o.bucket, key)
+	fmt.Println("S3保存処理完了:", s3URL)
+	return s3URL, nil
+}
+
+
+
+func (o *OpenAIClient) Analyze(title, lead, body, s3ImageURL string) (*entity.ReviewResult, error) {
 	prompt := fmt.Sprintf(`
 あなたはプレスリリースのレビュアーです。
 タイトルはプレスリリースで最も重要な要素です。読者やメディアの関心を引き、ニュース価値（メディアフック）を前半に盛り込むことを重視してください。
@@ -35,40 +108,67 @@ func (o *OpenAIClient) Analyze(title, lead, body string) (*entity.ReviewResult, 
 3. "suggestion": 「次に何をすべきか」を具体的に指示し、その上でユーザーがすぐに書き直せる修正文例を1つ提示してください。
    - 必ず「次に〇〇してみましょう。その例として以下のように書き直せます。」の形式で書くこと。
 
+   良いプレスリリースの定義を以下に定めます。これらの定義を基準にしてください:
+
+   - タイトル: 50-70文字程度で内容を要約し、5W2Hを盛り込みます。前半にはニュース性・話題性・数字・意外性などのメディアフックを含め、一目見て読者が『これ見たい!』と思うかどうかも評価してください。メディアフックとして以下の9つを意識してください:  
+	 1. 時流／季節性  
+	 2. 画像／映像  
+	 3. 逆説／対立  
+	 4. 地域性  
+	 5. 話題性  
+	 6. 社会性／公益性  
+	 7. 新規性／独自性  
+	 8. 最上級／希少性  
+	 9. 意外性  
+   
+   - リード文: 250-300文字程度でまとめ、発信したい内容の5W2Hを盛り込み、プレスリリース全体が理解できる内容にしてください。加えて、メディアフック9つの要素が含まれているかも評価対象としてください。
+   
+   - 本文: ① 誰に何のために伝えたい情報か、② なぜ自社がその活動を行うのか、③ 事実ベースで共感を呼ぶ内容、④ 理想の文書構成(起→承→転→展)。  
+   さらに、プレスリリースを通じて読者の共感を得るには、「感情」に訴えかけることが不可欠です。「喜び」「悲しみ」「恐怖・不安」「嫌悪」「驚き」「怒り」の6つの感情を引き出せるかを意識すると、メッセージがより深く伝わります。
+   - 喜び：嬉しい、楽しい、幸せな気持ち
+   - 悲しみ：共感ややさしさを誘う感情
+   - 恐怖・不安：問題提起とその解決策提示に活用
+   - 嫌悪：社会問題への関心喚起に
+   - 驚き：意外性やインパクトを与える
+   - 怒り：不満や理不尽さに共感し、行動を促す
+   プレスリリース作成時には、情報の読み手がどんな感情を抱くかを想定し、その感情に寄り添い、あるいは解消する立場で評価してください。例えば、読み手が「恐怖・不安」を感じる内容であればその対策を打ち出す、といったことです。   
+
+さらに、タイトル直後に掲載されるメイン画像1枚も評価してください。
+- 評価対象は「タイトル直後に掲載されるメイン画像1枚のみ」です
+プレスリリースの画像で、大事なことは「メディアの立場で使いやすいかどうか」です。
+記者はプレスリリースや取材で得た情報を基に、読み手に向けたコンテンツを作ります。
+その際に、どのような素材があれば記事作成しやすいかを考えてください。
+
+S3に保存されている画像について、以下で出力してください。
+1. "good": この画像の優れている点。メディアが使いやすい、魅力が伝わる、情報が理解しやすいなど。
+2. "improvement": 改善点。解像度、縦横比、テキストの有無、全体像の不明瞭さなど、メディア視点で使いにくい点。
+3. "suggestion": 「次に何をすべきか」を具体的に指示し、その上でユーザーが次どうすればいいかが分かる修正例を1つ提示してください。
+	- 必ず「次に〇〇してみましょう。その例として以下のように考えることができます。」の形式で書くこと。
+
+画像での評価基準:
+- 十分なサイズ・解像度があるか
+- 複数パターンが用意されているか
+- 企業イメージや全体像、利用シーンが伝わるか
+- 写真であれば、テキストやフィルターで加工されすぎていないか
+- 白背景や視覚的に整理された構図か
+- 商品・サービスの全体像が伝わるか
+- メディアが記事にしやすいか
+
 必ず以下のJSONフォーマットのみを返してください。余計な文章・改行・説明は禁止です。
 
 JSONフォーマット例:
 {
   "title": {"good": "...", "improvement": "...", "suggestion": "..."},
   "lead":  {"good": "...", "improvement": "...", "suggestion": "..."},
-  "body":  {"good": "...", "improvement": "...", "suggestion": "..."}
+  "body":  {"good": "...", "improvement": "...", "suggestion": "..."},
+  "image": {
+      "url": "S3にアップロードした画像URL",
+      "good": "...",
+      "improvement": "...",
+      "suggestion": "..."
+  }
 }
-
-良いプレスリリースの定義を以下に定めます。これらの定義を基準にしてください:
-
-- タイトル: 50-70文字程度で内容を要約し、5W2Hを盛り込みます。前半にはニュース性・話題性・数字・意外性などのメディアフックを含め、一目見て読者が『これ見たい!』と思うかどうかも評価してください。メディアフックとして以下の9つを意識してください:  
-  1. 時流／季節性  
-  2. 画像／映像  
-  3. 逆説／対立  
-  4. 地域性  
-  5. 話題性  
-  6. 社会性／公益性  
-  7. 新規性／独自性  
-  8. 最上級／希少性  
-  9. 意外性  
-
-- リード文: 250-300文字程度でまとめ、発信したい内容の5W2Hを盛り込み、プレスリリース全体が理解できる内容にしてください。加えて、メディアフック9つの要素が含まれているかも評価対象としてください。
-
-- 本文: ① 誰に何のために伝えたい情報か、② なぜ自社がその活動を行うのか、③ 事実ベースで共感を呼ぶ内容、④ 理想の文書構成(起→承→転→展)。  
-さらに、プレスリリースを通じて読者の共感を得るには、「感情」に訴えかけることが不可欠です。「喜び」「悲しみ」「恐怖・不安」「嫌悪」「驚き」「怒り」の6つの感情を引き出せるかを意識すると、メッセージがより深く伝わります。
-- 喜び：嬉しい、楽しい、幸せな気持ち
-- 悲しみ：共感ややさしさを誘う感情
-- 恐怖・不安：問題提起とその解決策提示に活用
-- 嫌悪：社会問題への関心喚起に
-- 驚き：意外性やインパクトを与える
-- 怒り：不満や理不尽さに共感し、行動を促す
-プレスリリース作成時には、情報の読み手がどんな感情を抱くかを想定し、その感情に寄り添い、あるいは解消する立場で評価してください。例えば、読み手が「恐怖・不安」を感じる内容であればその対策を打ち出す、といったことです。
-
+画像URL: %s
 入力文章:
 {
   "title": "%s",
@@ -76,7 +176,7 @@ JSONフォーマット例:
   "body": "%s"
 }
 
-`, title, lead, body)
+`, s3ImageURL, title, lead, body)
 
 	resp, err := o.client.Chat.Completions.New(context.TODO(), openai.ChatCompletionNewParams{
 		Model: openai.ChatModelGPT4o,
