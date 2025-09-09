@@ -4,15 +4,22 @@ import (
 	// "log"
 	// "os"
 
-	"github.com/labstack/echo/v4"
 	"prtimes/controller"
 	"prtimes/external"
 	"prtimes/usecase"
+
+	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v4/middleware"
 )
 
 func main() {
 	// Echo インスタンス作成
 	e := echo.New()
+	// CORS middleware
+	e.Use(middleware.CORSWithConfig(middleware.CORSConfig{
+		AllowOrigins: []string{"http://localhost:5173"},
+		AllowHeaders: []string{echo.HeaderOrigin, echo.HeaderContentType, echo.HeaderAccept},
+	}))
 
 	apiKey := ""
 
