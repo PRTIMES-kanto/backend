@@ -1,6 +1,7 @@
 package entity
 
 type FieldReview struct {
+	Good string `json:"good"`
 	Improvement string `json:"improvement"`
 	Suggestion  string `json:"suggestion"`
 }
