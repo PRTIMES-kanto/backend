@@ -6,7 +6,7 @@ import (
 )
 
 type ReviewUsecaseInterface interface {
-	AnalyzeContent(title, lead, body string) (*entity.ReviewResult, error)
+	AnalyzeContent(title, lead, body, mainImageURL string) (*entity.ReviewResult, error)
 }
 
 type ReviewUsecase struct {
@@ -19,6 +19,12 @@ func NewReviewUsecase(aiClient external.AIClientInterface) ReviewUsecaseInterfac
 	}
 }
 
-func (u *ReviewUsecase) AnalyzeContent(title, lead, body string) (*entity.ReviewResult, error) {
-	return u.AIClient.Analyze(title, lead, body)
+func (u *ReviewUsecase) AnalyzeContent(title, lead, body, mainImageURL string) (*entity.ReviewResult, error) {
+	// 画像をS3にアップロードしてURLを取得する
+	s3URL, err := u.AIClient.UploadImageToS3(mainImageURL)
+	if err != nil {
+		return nil, err
+	}
+
+	return u.AIClient.Analyze(title, lead, body, s3URL)
 }
