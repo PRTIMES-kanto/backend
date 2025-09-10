@@ -99,6 +99,8 @@ func (o *OpenAIClient) UploadImageToS3(imageURL string) (string, error) {
 
 
 func (o *OpenAIClient) Analyze(title, lead, body, s3ImageURL string) (*entity.ReviewResult, error) {
+    // fmt.Printf("DEBUG: title: %s, lead: %s, body: %s, imageURL: %s\n", 
+    //     title, lead, body, s3ImageURL)
 	prompt := fmt.Sprintf(`
 あなたはプレスリリースのレビュアーです。
 タイトルはプレスリリースで最も重要な要素です。読者やメディアの関心を引き、ニュース価値（メディアフック）を前半に盛り込むことを重視してください。
@@ -182,6 +184,5 @@ JSONフォーマット例:
 	if err := json.Unmarshal([]byte(aiText), &result); err != nil {
 		return nil, fmt.Errorf("failed to parse AI response as JSON: %w\nAI response: %s", err, aiText)
 	}
-
 	return &result, nil
 }
