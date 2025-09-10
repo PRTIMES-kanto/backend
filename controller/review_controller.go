@@ -3,8 +3,9 @@ package controller
 import (
 	"net/http"
 
-	"github.com/labstack/echo/v4"
 	"prtimes/usecase"
+
+	"github.com/labstack/echo/v4"
 )
 
 type ReviewController struct {
@@ -20,7 +21,7 @@ func NewReviewController(u usecase.ReviewUsecaseInterface) *ReviewController {
 func (rc *ReviewController) Review(c echo.Context) error {
 	var req struct {
 		Title string `json:"title"`
-		Lead  string `json:"lead"`
+		Lead  string `json:"lead_paragraph"`
 		Body  string `json:"body"`
 		MainImageURL string `json:"main_image_url"`
 		
